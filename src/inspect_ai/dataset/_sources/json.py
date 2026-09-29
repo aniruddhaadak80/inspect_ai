@@ -2,6 +2,7 @@ import json
 from io import TextIOWrapper
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import jsonlines
 
@@ -69,9 +70,7 @@ def json_dataset(
 
     # pick the right reader for the file extension
     dataset_reader = (
-        jsonlines_dataset_reader
-        if json_file.lower().endswith(".jsonl")
-        else json_dataset_reader
+        jsonlines_dataset_reader if is_jsonl_file(json_file) else json_dataset_reader
     )
 
     # use readahead cache by default for s3
@@ -103,6 +102,17 @@ def json_dataset(
             return dataset[0:limit]
 
     return dataset
+
+
+def is_jsonl_file(json_file: str) -> bool:
+    """Report whether a dataset location is JSON Lines.
+
+    Only the path is examined, so a query string or fragment on a remote URL
+    does not hide a `.jsonl` suffix, nor does it turn a `.json` URL into one.
+    """
+    parsed = urlparse(json_file)
+    file_path = parsed.path if parsed.scheme else json_file
+    return file_path.lower().endswith(".jsonl")
 
 
 def jsonlines_dataset_reader(file: TextIOWrapper, **kwargs: Any) -> DatasetReader:

@@ -4,7 +4,7 @@ import json as json_module
 import os
 from pathlib import Path
 from typing import Type, TypeVar
-from unittest.mock import Mock
+from unittest.mock import Mock, mock_open
 
 import pytest
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ from inspect_ai.dataset import (
     json_dataset,
 )
 from inspect_ai.dataset._util import read_choices
+from inspect_ai.dataset._sources.json import is_jsonl_file
 from inspect_ai.model._chat_message import ChatMessageUser
 
 T_ds = TypeVar("T_ds")
@@ -75,6 +76,56 @@ def test_file_dataset_url_query_uses_path_extension(
 
     assert file_dataset(url) is expected
     assert mock_reader.call_args.kwargs[file_argument] == url
+
+
+@pytest.mark.parametrize(
+    ("url", "expect_jsonlines"),
+    [
+        ("https://example.test/data.jsonl", True),
+        ("https://example.test/data.jsonl?download=1", True),
+        ("https://example.test/data.jsonl#samples", True),
+        ("https://example.test/data.jsonl?download=1#samples", True),
+        ("https://example.test/DATA.JSONL?download=1", True),
+        ("https://example.test/data.json", False),
+        ("https://example.test/data.json?download=1", False),
+        ("https://example.test/data.json?download=data.jsonl", False),
+        ("https://example.test/data?file=data.jsonl", False),
+    ],
+)
+def test_json_dataset_reader_selected_from_path_extension(
+    url: str, expect_jsonlines: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jsonlines_reader = Mock(return_value=iter([]))
+    json_reader = Mock(return_value=iter([]))
+    file_mock = Mock(return_value=mock_open(read_data="")())
+    monkeypatch.setattr(
+        "inspect_ai.dataset._sources.json.jsonlines_dataset_reader", jsonlines_reader
+    )
+    monkeypatch.setattr(
+        "inspect_ai.dataset._sources.json.json_dataset_reader", json_reader
+    )
+    monkeypatch.setattr("inspect_ai.dataset._sources.json.file", file_mock)
+
+    json_dataset(url)
+
+    if expect_jsonlines:
+        jsonlines_reader.assert_called_once()
+        json_reader.assert_not_called()
+    else:
+        json_reader.assert_called_once()
+        jsonlines_reader.assert_not_called()
+
+    # the query and fragment must still reach the filesystem
+    assert file_mock.call_args.args[0] == url
+
+
+def test_is_jsonl_file_reads_local_paths() -> None:
+    assert is_jsonl_file("dataset.jsonl") is True
+    assert is_jsonl_file(dataset_path("dataset.jsonl")) is True
+    assert is_jsonl_file("DATASET.JSONL") is True
+    assert is_jsonl_file("dataset.json") is False
+    # a no-scheme location is returned as-is, so local names are unaffected
+    assert is_jsonl_file("dataset.jsonl?download=1") is False
 
 
 @pytest.mark.parametrize(
